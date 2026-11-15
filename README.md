@@ -25,7 +25,7 @@ A Claude skill that produces a complete **YouTube news episode** in two phases: 
 
 ## Installing
 
-This skill relies on **documentary-animation** for its build pipeline (Remotion, Three.js, sound and quality checks), so install that too.
+**Standalone:** the skill carries its own build engine. `references/engine.md` is a frozen copy of the documentary-animation pipeline (v16), bundled with its scripts and reference files, and the rendering, typography and chart rules are written into `SKILL.md`, so no other skill is needed.
 
 **Claude apps:** zip `skills/youtube-news-video` and upload it under *Customize → Skills* (or add this folder as a plugin).
 
@@ -37,7 +37,7 @@ cp -R skills/youtube-news-video ~/.claude/skills/
 
 ## Requirements
 
-- Everything documentary-animation needs: Node.js, Remotion, Three.js, FFmpeg and Python audio tools.
+- Node.js 18+, Remotion and Three.js (the project is created by the skill; see `references/engine.md`), FFmpeg, and Python 3 with `faster-whisper`, `librosa` and `soundfile`.
 - An ElevenLabs account to record the narration from the scripts.
 - Web search, for the research phase.
 
@@ -61,5 +61,15 @@ The brand section in `SKILL.md` has placeholders: the channel name, palette, cat
 
 ```
 skills/youtube-news-video/
-  SKILL.md    phases, brand, Cinematic Desk motion style, sound design, build and final checks
+  SKILL.md               phases, brand, house rules (rendering, typography, charts), Cinematic Desk
+                         motion style, sound design, build and final checks
+  references/
+    engine.md            bundled build engine: setup, timing, camera library, Three.js rules,
+                         preview → final, sound and mix, Shorts, captions, quality checks
+    camera_bible.md, director.md, composition_decider.md, hero_checklist.md,
+    living_motion.md, reference_matching.md, subframe_accumulation.md
+  scripts/
+    render_scan.py, beat_sheet.py, check_shotlist.py, check_palette.py, check_frames.py,
+    cam_track.mjs, eleven_sfx.py, eleven_voice.py, ref_frames.py, track_motion.py,
+    fit_easing.py, motion_compare.py
 ```

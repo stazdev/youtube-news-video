@@ -12,14 +12,28 @@ This skill produces one news episode in two phases:
 
 Always say which phase you are in. If the user uploads audio clips named like the ones below, go straight to Phase 2.
 
-## Skills this one relies on
+## Engine and house rules (bundled; this skill is standalone)
 
-Read these before Phase 2. Where they conflict with this skill on look or style, this skill wins.
+This skill needs no other skill. Everything it uses ships inside it (`<skill>` is this skill's folder); **don't use a separately installed documentary-animation, video-making, frontend-design or dataviz skill**, even if one is available.
 
-- `anthropic-skills:documentary-animation`: the build pipeline. It covers Remotion, Three.js via `@remotion/three`, Drei, postprocessing, GSAP, motion blur, camera rigs, the procedural sound kit, librosa audio sync, the FFmpeg mix and quality checks. Ignore its default "flat geometric vector" house style and use the **Cinematic Desk** look below instead.
-- `anthropic-skills:video-making`: rendering and encoding rules.
-- `anthropic-skills:frontend-design`: typography, layout and an intentional aesthetic for cards, lower-thirds and the thumbnail.
-- `dataviz`: any chart, number callout or palette check, run through its color validator.
+- **Engine manual:** `<skill>/references/engine.md`, a frozen copy of the documentary-animation build pipeline (v16). Read it before Phase 2 and follow these sections unless this file says otherwise: One-time setup (Remotion, Three.js via `@remotion/three`, Drei, postprocessing, GSAP, motion blur), Determinism, Timing (1, 1b: Whisper word timings, `timeline.json`, librosa), Camera library (5a-2), Smoothness toolkit (5), Three.js rules (6), Preview → review → final (7), Sound, grade and assembly (8), Shorts (8a), Captions (8b) and Quality checks. Ignore its house style (5a) and its Midnight Rose brand: the **Cinematic Desk** look and the brand below win.
+- **Scripts** (`<skill>/scripts/`, run with the project's `.venv/bin/python -I`): `render_scan.py` (blank, black or frozen frames), `beat_sheet.py`, `check_shotlist.py`, `check_palette.py`, `check_frames.py`, `cam_track.mjs`, `eleven_sfx.py` (ElevenLabs sound effects, only with the user's OK on credits), `eleven_voice.py` (only if the user asks Claude to generate the narration), `ref_frames.py`, `track_motion.py`, `fit_easing.py`, `motion_compare.py`.
+- **References** (`<skill>/references/`): `director.md` + `camera_bible.md` (shot choice and the director self-check), `composition_decider.md`, `hero_checklist.md`, `living_motion.md`, `reference_matching.md`, `subframe_accumulation.md` (depth of field when postprocessing `DepthOfField` renders blank).
+
+**Rendering and encoding (house rules).**
+- Long form 1920×1080 at 30 fps; Shorts 1080×1920; H.264 (`-c:v libx264 -pix_fmt yuv420p -crf 18 -preset slow`), AAC 320 kbps at 48 kHz, `-movflags +faststart`. Render with Remotion, mix and mux with FFmpeg; never re-encode a finished video twice.
+- Render a draft at `--scale=0.5` first, check it, then the final. Measure render time on a short test range before quoting a total.
+- Every frame comes from `useCurrentFrame()`; no CSS animations, timers or unseeded randomness.
+
+**Typography and layout (house rules).**
+- One display serif with an italic for headlines and hero words, Inter for everything else; loaded from local font files, never from a CDN at render time.
+- Keep text inside the title-safe area (5 % margin on long form; Shorts: away from the top 15 % and bottom 20 %). Headlines at least 64 px on 1080p, labels at least 28 px, captions 44-56 px; strong contrast (ink on paper, paper on charcoal), never mid-grey text.
+- One clear focal point per shot; align to a simple grid; generous spacing; no decorative elements that don't carry information.
+
+**Charts, numbers and colour (house rules).**
+- Pick the simplest honest chart: bars for comparisons (axis from zero), lines for change over time, one big number for a single figure. Label values directly instead of using a legend where possible; always show the unit and the source.
+- Use the category accent for the series that matters and neutral greys for the rest; never more than 4 colours in one chart. Check contrast and colour-blind safety with `scripts/check_palette.py --hex "<colours>"`.
+- Numbers on screen match the narration exactly (rounding included) and the source list.
 
 ---
 
@@ -33,7 +47,7 @@ Until the user sets these, use the defaults below and keep them the same in ever
 - **Type:** an expressive display serif with an italic (e.g. Instrument Serif or Fraunces, OFL) for headlines and hero words, plus Inter (already installed) for labels, body and captions. Load fonts from local files.
 - **Intro:** a 5–8 s title sting with the date. **Outro:** 8–10 s with a subscribe prompt and a next-episode card.
 - **Sign-on:** "Here's what's happening around the world today." **Sign-off:** "That's your briefing. Stay informed, and we'll see you next time."
-- Once decided, record the brand in `theme.ts` and `channel_bible.md` (see documentary-animation) and never change it between episodes.
+- Once decided, record the brand in `theme.ts` and `channel_bible.md` (see the engine's Channel bible section) and never change it between episodes.
 
 ---
 
@@ -161,7 +175,7 @@ Keep each transition to 2–3 s. Vary the flight path every time, and vary the p
 
 ## Phase 2: Build
 
-1. Read the skills listed at the top. Set up or reuse the Remotion project and build the reusable components once: `NewsBrief`, `GoboLight`, `KineticHeadline`, `TrailWord`, `CheckTick`, `PaperPlaneFold`, `CategoryWorld`, `GlobePin`, `BigNumber`, `QuoteCard`, `TitleSting`, `Outro`.
+1. Read the engine sections listed at the top. Set up or reuse the Remotion project and build the reusable components once: `NewsBrief`, `GoboLight`, `KineticHeadline`, `TrailWord`, `CheckTick`, `PaperPlaneFold`, `CategoryWorld`, `GlobePin`, `BigNumber`, `QuoteCard`, `TitleSting`, `Outro`.
 2. Measure the clips, transcribe them for word timings (faster-whisper), and build `timeline.json`.
 3. Write the storyboard from the Phase 1 scene plan.
 4. Render test stills at the busiest moments at full size and look at them. Check the light, focus, readability and that frames aren't blank.
@@ -189,6 +203,6 @@ Keep each transition to 2–3 s. Vary the flight path every time, and vary the p
   - focus lands on the hero word
   - there's no flicker and no blank WebGL frames
   - captions are in sync and clear of the Shorts UI zones
-- Run the documentary-animation director self-check: every scene changes on a spoken beat, there's one clear focus per shot, and nothing is static for more than ~4 s.
+- Run the director self-check (`references/director.md`): every scene changes on a spoken beat, there's one clear focus per shot, and nothing is static for more than ~4 s.
 - Confirm that the durations match the audio, every clip was used, and the loudness is about -14 LUFS.
 - Deliver the long-form MP4, 2 Short MP4s, the thumbnail PNG and the final metadata.
