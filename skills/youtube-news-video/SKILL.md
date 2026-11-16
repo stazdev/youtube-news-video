@@ -184,6 +184,8 @@ Then run `check <episode>/scripts --out <episode>/audio` and report the results.
 
 ## Motion style: "Cinematic Desk"
 
+**Channel look wins.** Read `channel_bible.md` first. If it records a different look (for example a light 2D editorial look matched from a reference clip: paper + grid, TagCard grow-in, word blur-in, font-cycling hero word, count-up numbers, dashed keyword chips, zoom-through category fields), build that look with the components listed there and skip the Three.js / Drei / postprocessing installs. The Cinematic Desk below is only the default for a channel with no recorded look.
+
 The target is a physically lit 3D world rendered in code that feels filmed, not templated. The user's reference was a three.js/WebGL piece with these qualities: a paper sheet on a textured surface, window-light shadows sweeping across it, kinetic serif type with rainbow motion trails, checkboxes ticking on beat, a slow camera dolly, the paper folding into a paper plane, and a flight through giant 3D letters in a bright sky.
 
 Take the ideas only. Never copy the reference's frames or text.
@@ -271,6 +273,40 @@ Keep each transition to 2–3 s. Vary the flight path every time, and vary the p
 
 ---
 
+## Lessons from past episodes (read before Phase 1; add to after every approved video)
+
+**Cloud workspace network (episode 2026-11-16).**
+- The shell can reach PyPI, npm and GitHub only. For the free Kokoro voice, ask the user in ONE message to allow all three: `huggingface.co`, `us.aws.cdn.hf.co`, `cas-server.xethub.hf.co` (Settings → Capabilities on claude.ai in a browser). The model files come from the last two; `HF_HUB_DISABLE_XET` does not help. faster-whisper models download from the same hosts.
+- ElevenLabs (`api.elevenlabs.io`) and the PyTorch CPU index are blocked by default. Install torch from plain PyPI (the voice venv is about 6.4 GB).
+- The default `python3` is 3.13; make the voice venv with `uv venv -p /usr/bin/python3.12 .venv-voice` and link `.venv` to it. Run `eleven_voice.py` with `VIRTUAL_ENV` and `PATH` pointing at that venv (it calls `uv pip install` for the spaCy model).
+- faster-whisper 1.2.1 breaks with PyAV 19 (`metadata_errors`), which breaks `sync_check.py`: pin `av==14.2.0` (`--only-binary=:all:`). In your own scripts pass audio as a numpy array (`librosa.load(..., sr=16000)`).
+- Remotion can't download its browser (`remotion.media` is blocked). Use the preinstalled one: `Config.setBrowserExecutable("/opt/pw-browsers/chromium_headless_shell-*/chrome-headless-shell-linux64/chrome-headless-shell")` (check the exact path with `find`).
+
+**Speed (2 CPUs, 2D look).** Bundle once with `npx remotion bundle src/index.ts --out-dir build` and render stills and videos from `build` (a fresh still otherwise costs ~26 s). Measured: a 2:12 half-size draft takes ~3.5 min; the full 1080p master (crf 12) ~8 min; each Short master ~3 min; the final `-preset slow` ffmpeg encode ~13-16 min for 2:12. When only the audio changes, copy the graded picture (`-c:v copy`) and swap the soundtrack (`tools/mix.py … --audio-only`) instead of re-encoding. When one section changes, render just that frame range and splice it into the master.
+
+**Reusable project tools (reuse them if the project has them):** `tools/timing.py` (Whisper word times corrected against the scripts → `timeline.json`, plus librosa pace, pauses and emphasis), `tools/beats.py` (writes `check_timeline.json`: `scenes` with `beats` and `flight: {start, dur}` for `beat_sheet.py` / `render_scan.py`, and `segments` with `words: [{w, f}]` for `sync_check.py`), `tools/sfx.py` (procedural sound kit and 100 bpm bed), `tools/mix.py` (voice on its frames, SFX on beat words, ducked bed, two-pass loudnorm, grade and grain), `tools/srt.py` (SRT files and chapter times).
+
+**Timing traps.**
+- Look words up by text and occurrence, and check every occurrence first: "full day" vs "Full briefing", "led it" vs "It came", "Nigeria's" vs "Nigeria", the article "A". Make the lookup throw when a word is missing, so typos fail loudly.
+- Switch a block about 6 frames before the first word the NEW block shows, not the start of the sentence; otherwise the stage is empty.
+- Every scene has a non-word element (card, graphic or title) on its first frame, including the recap after a transition. `render_scan.py` fails an empty frame.
+- Text spelled for the voice ("A I", "three, one") must be shown in its written form ("AI") in captions and SRT files.
+
+**Look and layout (from the fresh-eyes critic).**
+- At most one decorative star.
+- Use the card's ball accent only on the hook, intro and subscribe cards.
+- Long-form chips are ≥ 50 px; keep content above y ≈ 880 on 1080p so the caption pill never covers it.
+- Hide a card before its start frame (the grow-from-line otherwise leaves a thin line), and pad its line mask so descenders aren't cut.
+- When places sit on opposite hemispheres, use a flat world map, not a globe.
+- The picture must say what the line says: "ground stop" means parked planes with stop marks, not planes flying.
+- Full-frame colour fields need deeper accent variants (the brand accents fail `check_palette.py`'s chroma limit at large size). During the zoom-through, let the shrinking circle clip the category word away; never fade it out, or the frames go flat.
+
+**Direction.** Pick each chapter opener's movement family before the final render: the openers must all differ, and no more than 3 medium shots in a row. Fixing this after the render means rendering again.
+
+**Sound.** A bed at gain 0.16 sat only ~1 dB under a Kokoro voice. Use ~0.025 (about 15 dB under before ducking) plus sidechain ducking, and measure voice vs bed LUFS before the final encode.
+
+**Research.** Searches often return pages from last year. Use `extended` mode with dated queries ("November 15 2026"), and look for leads in dated round-ups (Anadolu morning briefing, Euronews bulletins); then confirm each story with two outlets. Weekend episodes can have stories 3-4 days old: say so in the doc. Attribute sensitive allegations, and keep them off on-screen text unless they're attributed.
+
 ## Final checks (before delivering)
 
 - Re-check every fact, number, name and date against the source list.
@@ -285,3 +321,7 @@ Keep each transition to 2–3 s. Vary the flight path every time, and vary the p
 - Run `scripts/sync_check.py <final.mp4> anim/src/data/timeline.json` on every final video (long form and Shorts) and fix any FAIL before delivering: a voice that runs ahead of or behind the picture can't be seen on still frames.
 - Every uploaded photo is used where planned, credited on screen and in the description, and sharp at 1080p.
 - Deliver the long-form MP4, 2 Short MP4s, the thumbnail PNG and the final metadata.
+
+## After the user approves a video: improve this skill (always)
+
+Do this after every approved video. Once the user approves the finished episode (or ask for no more changes), collect what this run taught: blocked hosts and their fixes, measured render and encode times, bugs and their causes, critic and user corrections, new reusable tools or components. Add the useful ones to "Lessons from past episodes", update rows that turned out wrong, and keep each lesson to one or two actionable lines. Then propose those edits as a skill update (on claude.ai, call `propose_skills` with kind `improvement`, target `youtube-news-video`; elsewhere, show the edits so the user can save them), and tell the user in one line that the update is ready to save. User corrections also go into `channel_lessons.md` the same day.
