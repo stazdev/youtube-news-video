@@ -1,15 +1,12 @@
 #!/usr/bin/env python3
-"""Colour checker for the composition decider (no neon, controlled chroma, readable contrast).
+"""Colour checker (no neon, controlled chroma, readable contrast).
 
 Usage:
-  python3 check_palette.py anim/direction/look.json      # checks every chapter/scene palette in look.json
   python3 check_palette.py --hex "#0E3B5C,#1F7FB0,#7FC8E8,#F5F7FA,#F2C14E"
-  python3 check_palette.py --library                     # checks the mood library in references/composition_decider.md
-Palette order: dominant, secondary, tertiary, light, accent (the 5th colour is the accent). Exit code 1 on any failure.
+Palette order: dominant, secondary, tertiary, light, accent (the last colour is the accent). Exit code 1 on any failure.
 Standard library only.
 """
-import json, math, re, sys
-from pathlib import Path
+import math, re, sys
 
 def srgb_to_lin(c):
     c /= 255.0
@@ -55,7 +52,7 @@ def check(name, pal, neon_ok=False):
         L, C, _ = oklch(h)
         if is_neon(h) and not neon_ok: errs.append(f'{h} is neon (L={L:.2f}, C={C:.3f}); neon only where the script asks for it')
         accent = i == len(pal) - 1
-        lim = 0.19 if accent else 0.16
+        lim = 0.24 if accent else 0.16  # accents are small tags and trails; large areas stay calmer
         if C > lim and not neon_ok: errs.append(f'{h} chroma {C:.3f} > {lim} ({"accent" if accent else "large-area"} limit)')
     darkest = min(pal, key=lum); lightest = max(pal, key=lum)
     cr = contrast(darkest, lightest)
@@ -66,22 +63,9 @@ def check(name, pal, neon_ok=False):
 
 def main():
     a = sys.argv[1:]
-    ok = True
-    if not a:
+    if len(a) < 2 or a[0] != '--hex':
         print(__doc__); sys.exit(2)
-    if a[0] == '--hex':
-        ok = check('palette', [x for x in re.split(r'[\s,]+', a[1]) if x])
-    elif a[0] == '--library':
-        md = (Path(__file__).resolve().parent.parent / 'references' / 'composition_decider.md').read_text()
-        for m in re.finditer(r'^\| ([a-z-]+) \| ((?:#[0-9A-Fa-f]{6} ?){5}) \|', md, re.M):
-            ok &= check(m.group(1), m.group(2).split())
-    else:
-        look = json.loads(Path(a[0]).read_text())
-        neon = set(look.get('neon_allowed_scenes', []))
-        for ch in look.get('chapters', []):
-            ok &= check(f"chapter {ch.get('n')} ({ch.get('mood', '')})", ch['palette'])
-        for sc in look.get('scenes', []):
-            if 'palette' in sc: ok &= check(f"scene {sc['id']}", sc['palette'], sc['id'] in neon)
+    ok = check('palette', [x for x in re.split(r'[\s,]+', a[1]) if x])
     sys.exit(0 if ok else 1)
 
 if __name__ == '__main__':

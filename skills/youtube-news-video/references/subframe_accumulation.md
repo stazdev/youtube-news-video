@@ -56,4 +56,3 @@ Change both 8s for another N. Then drop `S07_hero.mp4` into the master with `<Of
 - Beat sheet on the averaged clip (`scripts/beat_sheet.py`): the focus subject must stay sharp; only
   the background (DoF) or the moving parts (motion blur) soften.
 - Text and labels are **never** rendered in the sub-frame composition (they'd smear); overlay them afterwards.
-- Blender hero shots don't need this: Blender has its own motion blur and depth of field.

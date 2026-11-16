@@ -7,8 +7,8 @@ description: "Use when the user wants a YouTube news episode: research the lates
 
 This skill produces one news episode in two phases:
 
-- **Phase 1:** research the stories, write the scripts and YouTube metadata, then stop and wait for the user's audio.
-- **Phase 2:** the user uploads their ElevenLabs clips. Build the long-form video, 2 Shorts and a thumbnail in the cinematic motion style described below.
+- **Phase 1:** ask how long the episode should be, research the stories, write the scripts and YouTube metadata, ask whether the user wants to upload images and whether they have a reference animation, then stop and wait for the user's audio (and images or reference, if any).
+- **Phase 2:** Claude records the clips with the user's ElevenLabs key, or the user uploads their own (plus any images or reference). Build the long-form video, 2 Shorts (unless the user asks for none) and a thumbnail in the cinematic motion style described below.
 
 Always say which phase you are in. If the user uploads audio clips named like the ones below, go straight to Phase 2.
 
@@ -16,9 +16,9 @@ Always say which phase you are in. If the user uploads audio clips named like th
 
 This skill needs no other skill. Everything it uses ships inside it (`<skill>` is this skill's folder); **don't use a separately installed documentary-animation, video-making, frontend-design or dataviz skill**, even if one is available.
 
-- **Engine manual:** `<skill>/references/engine.md`, a frozen copy of the documentary-animation build pipeline (v16). Read it before Phase 2 and follow these sections unless this file says otherwise: One-time setup (Remotion, Three.js via `@remotion/three`, Drei, postprocessing, GSAP, motion blur), Determinism, Timing (1, 1b: Whisper word timings, `timeline.json`, librosa), Camera library (5a-2), Smoothness toolkit (5), Three.js rules (6), Preview → review → final (7), Sound, grade and assembly (8), Shorts (8a), Captions (8b) and Quality checks. Ignore its house style (5a) and its Midnight Rose brand: the **Cinematic Desk** look and the brand below win.
-- **Scripts** (`<skill>/scripts/`, run with the project's `.venv/bin/python -I`): `render_scan.py` (blank, black or frozen frames), `beat_sheet.py`, `check_shotlist.py`, `check_palette.py`, `check_frames.py`, `cam_track.mjs`, `eleven_sfx.py` (ElevenLabs sound effects, only with the user's OK on credits), `eleven_voice.py` (only if the user asks Claude to generate the narration), `ref_frames.py`, `track_motion.py`, `fit_easing.py`, `motion_compare.py`.
-- **References** (`<skill>/references/`): `director.md` + `camera_bible.md` (shot choice and the director self-check), `composition_decider.md`, `hero_checklist.md`, `living_motion.md`, `reference_matching.md`, `subframe_accumulation.md` (depth of field when postprocessing `DepthOfField` renders blank).
+- **Engine manual:** `<skill>/references/engine.md`, the build manual for Phase 2: setup (Remotion, Three.js via `@remotion/three`, Drei, postprocessing, GSAP), determinism, channel bible and lessons, timing (Whisper word timings, `timeline.json`, librosa), direction and style frames, camera and smoothness, Three.js rules, preview → final, sound and mix, Shorts, captions and quality checks. Read it all before Phase 2.
+- **Scripts** (`<skill>/scripts/`; Python ones run with the project's `.venv/bin/python -I`): `render_scan.py` (blank, black, flashing or frozen frames, loudness, phone sheet), `beat_sheet.py` (a still after every beat), `check_shotlist.py` (shot variety rules), `check_palette.py` (neon, chroma and contrast), `check_frames.py` (washed-out or oversaturated frames), `cam_track.mjs` (parked 3D cameras), `eleven_voice.py` (records the voice clips with the user's ElevenLabs key and checks them with Whisper), `eleven_sfx.py` (ElevenLabs sound effects, only with the user's OK on credits), and for reference matching `ref_frames.py` (frames and contact sheets), `track_motion.py` (one element's position, size and fade per frame), `fit_easing.py` (timing and easing of one move, as a Remotion line) and `motion_compare.py` (reference vs ours, pass within ±0.08 s).
+- **References** (`<skill>/references/`): `director.md` + `camera_bible.md` (shot choice and the director self-check), `living_motion.md` (smooth paths, idle motion, no empty-frame transitions), `hero_checklist.md` (measurable checklists for the signature pieces), `reference_matching.md` ("make it move like this"), `subframe_accumulation.md` (depth of field and motion blur when postprocessing `DepthOfField` renders blank).
 
 **Rendering and encoding (house rules).**
 - Long form 1920×1080 at 30 fps; Shorts 1080×1920; H.264 (`-c:v libx264 -pix_fmt yuv420p -crf 18 -preset slow`), AAC 320 kbps at 48 kHz, `-movflags +faststart`. Render with Remotion, mix and mux with FFmpeg; never re-encode a finished video twice.
@@ -32,7 +32,7 @@ This skill needs no other skill. Everything it uses ships inside it (`<skill>` i
 
 **Charts, numbers and colour (house rules).**
 - Pick the simplest honest chart: bars for comparisons (axis from zero), lines for change over time, one big number for a single figure. Label values directly instead of using a legend where possible; always show the unit and the source.
-- Use the category accent for the series that matters and neutral greys for the rest; never more than 4 colours in one chart. Check contrast and colour-blind safety with `scripts/check_palette.py --hex "<colours>"`.
+- Use the category accent for the series that matters and neutral greys for the rest; never more than 4 colours in one chart. Check neon, chroma and contrast with `scripts/check_palette.py --hex "<colours>"`, and never tell two series apart by red versus green alone (add a label or a pattern).
 - Numbers on screen match the narration exactly (rounding included) and the source list.
 
 ---
@@ -51,9 +51,24 @@ Until the user sets these, use the defaults below and keep them the same in ever
 
 ---
 
+## Phase 1: Episode length
+
+Unless the user already said how long the episode should be, ask first, as one multiple-choice question (AskUserQuestion), before any research:
+
+| Option | Long form | Stories | Each story |
+|---|---|---|---|
+| Quick | about 2 minutes | 5 | 15-20 s (~40-50 words) |
+| Standard | about 5 minutes | 5-6 | 40-50 s (~100-125 words) |
+| Full | about 8-12 minutes | 6-8 | 60-90 s (~150-220 words) |
+| Custom (Other) | whatever the user says | scale from the rows above | |
+
+Use about 2.5 spoken words per second to turn a length into word counts. Keep the intro and outro at 8-10 s each for Quick and 15-20 s for the other lengths. The 2 Shorts are always 40-55 s whatever the length. Remember the choice for Phase 2 and say it back in one line.
+
+---
+
 ## Phase 1: Research
 
-**Topics.** Cover world, tech, business and sports. Add others if there's major news, such as science, health, Africa/Nigeria or entertainment. Each episode has **at least 5 stories**, and at least 3 categories must be represented.
+**Topics.** Cover world, tech, business and sports. Add others if there's major news, such as science, health, Africa/Nigeria or entertainment. Each episode has the number of stories that fits the chosen length (at least 5 unless the user asks for fewer), and at least 3 categories must be represented.
 
 **Recency.** Use stories from the last 24–48 hours. Check today's date first and search using it.
 
@@ -84,12 +99,12 @@ The user records **one ElevenLabs clip per segment**. Give each clip's spoken te
 
 | File | Content | Target length |
 |---|---|---|
-| `00_intro.txt` | Sign-on and a one-line teaser for the top 3 stories | 15–20 s (~40–50 words) |
-| `01_story.txt` … `NN_story.txt` | One story each | 60–90 s (~150–220 words) |
-| `99_outro.txt` | Quick recap and the sign-off | 15–20 s |
+| `00_intro.txt` | Sign-on and a one-line teaser for the top 3 stories | from the chosen length |
+| `01_story.txt` … `NN_story.txt` | One story each | from the chosen length |
+| `99_outro.txt` | Quick recap and the sign-off | from the chosen length |
 | `short_A.txt`, `short_B.txt` | Standalone condensed versions of the 2 Short stories, with a hook in the first 2 seconds | 40–55 s (~100–135 words) |
 
-Aim for a long-form total of about 7–12 minutes.
+Add up the word counts and check that the long form lands within about 10% of the chosen length; trim or expand stories, not the intro and outro, to get there.
 
 **Writing for voice (ElevenLabs).**
 
@@ -105,11 +120,34 @@ Aim for a long-form total of about 7–12 minutes.
 ## Phase 1: YouTube metadata
 
 - **Title:** under 70 characters, factual, no clickbait. Give 3 options.
-- **Description:** a 2–3 line summary, chapters (fill in exact times in Phase 2), a full **Sources** list with links, and a note that the visuals are animated graphics.
+- **Description:** a 2–3 line summary, chapters (fill in exact times in Phase 2), a full **Sources** list with links, a note that the visuals are animated graphics, and photo credits when photos are used.
 - **Tags:** 15–25 tags.
 - **Shorts:** a title and description for each, plus 3–5 hashtags including #Shorts.
 
-Deliver Phase 1 as one doc, then ask for the clips using the exact file names (`00_intro.mp3`, `01_story.mp3`, …, `99_outro.mp3`, `short_A.mp3`, `short_B.mp3`).
+Deliver Phase 1 as one doc, then do the two steps below.
+
+---
+
+## Phase 1: Voice, images and reference animation (ask every episode)
+
+Photos are allowed, including photos of real people (for example the leader, athlete or chief executive a story is about). Claude doesn't fetch photos itself: they come from the user.
+
+1. Add an **image wish list** to the Phase 1 doc: for each story, 1-3 images that would help, each with a file name, what it should show and the line it goes with. Example: `img_02_a.jpg`: the finance minister at the budget briefing, for "presented the budget on Tuesday". Shorts reuse the same names.
+2. Ask these questions in one AskUserQuestion call:
+   - **"Should I record the voice clips with your ElevenLabs API key, or will you record them yourself?"** Options: "Record them with my key" and "I'll record them". Skip it when the user already said which earlier in the conversation.
+   - **"Would you like to upload images for these stories, or should I go ahead without them?"** Options: "I'll upload images" and "Go ahead without images".
+   - **"Do you have a reference animation you'd like any part of the episode to move like (the intro, the transitions, the headline reveal, the Shorts hook…)?"** Options: "Yes, I'll send it" and "No, use the house style". Skip this question when the user already gave a reference or said no to one earlier in the conversation.
+3. If the user chose "Record them with my key", follow **Voice (recorded by Claude)** below and don't ask for clips. Otherwise ask for the clips using the exact file names (`00_intro.mp3`, `01_story.mp3`, …, `99_outro.mp3`, `short_A.mp3`, `short_B.mp3`), plus the images with the names from the wish list if the user chose to upload, and the reference clip (a video or GIF file, or a link, with the part they mean and which piece it's for) if they have one. Ask the user to send only images they have the right to use (their own, licensed, official handouts or press kits, or Wikimedia Commons with its licence) and to tell you the credit line for each.
+4. If the user goes ahead without images, build every shot from code graphics as described below. Any missing image falls back the same way.
+5. If the user goes ahead without a reference, use the Cinematic Desk motion as written below. A reference matched in an earlier episode is already built into its component, so don't ask about that piece again unless the user wants to change it.
+
+### Voice (recorded by Claude)
+Uses the user's own ElevenLabs account through `scripts/eleven_voice.py`, run from the project root with `.venv/bin/python -I`.
+- **Key:** `ELEVENLABS_API_KEY=...` in the project's `keys.env`. If it's missing, ask the user to paste it there themselves, or, with their OK, copy that one line from another of their projects' `keys.env` without showing it. Never print the key or put it in the skill, a zip, chat output or a commit.
+- **Voice:** `settings.json` → `"voice"` in the project root (`voice_id`, `voice_name`, `model_id` `eleven_v4`, `stability` 0.5, `similarity_boost` 0.75, `style` 0, `output_format` `mp3_44100_128`). On the first episode, if no voice is set, ask which voice to use (`eleven_voice.py voices` lists the library for free) and save the choice; never change it between episodes unless the user asks.
+- **Run:** `plan <episode>/scripts` (free: clips, characters ≈ credits) → `generate <episode>/scripts --out <episode>/audio --yes`, adding `--only 00_intro,01_story,…` when the user wants only some clips (for example no Shorts). The user's request to record counts as the OK to spend the credits; tell them the character total in the report. Clips that already exist are skipped (`--force` redoes one).
+- **Checks (automatic):** every take is transcribed with Whisper and compared with its script; below 0.85 it is retaken (at most 2 retakes). `voice_report.json` flags low matches, clips more than 3 dB louder or quieter than the others, and clipping. Read the transcripts of anything under 1.00: a misspelt name ("Besant") is Whisper, a missing or changed word is the voice. Report every flag; the user decides whether to keep or redo a clip.
+- **Licence:** ElevenLabs voices in monetised videos need a paid ElevenLabs plan; remind the user once if unsure.
 
 ---
 
@@ -133,6 +171,7 @@ Take the ideas only. Never copy the reference's frames or text.
 - Use a rack focus from the headline to the keywords.
 - Use a fast whip or fly-through only for transitions, with motion blur.
 - Nothing stays static for more than ~4 s.
+- **Pace follows the voice.** Measure the words per second of each clip (engine section 4b): calm delivery (≤ 2.3 words/s, long pauses) gets a new shot every 5-8 s and fast moves only on emphasis words; brisk delivery (≥ 2.8 words/s) gets a new shot every 2-4 s; anything in between sits in the middle. Breaking stories may run brisk even when the voice is calm.
 
 **Kinetic type.**
 
@@ -149,7 +188,9 @@ Take the ideas only. Never copy the reference's frames or text.
 
 Keep each transition to 2–3 s. Vary the flight path every time, and vary the plane's entry angle per episode so it doesn't feel repetitive.
 
-**Inside a story**, cut away from the brief to supporting 3D or 2.5D shots as the script needs: a lit globe with the location pin, an extruded chart, a timeline ribbon, or a quote card (quotes under 15 words, attributed). Then return to the brief.
+**Inside a story**, cut away from the brief to supporting 3D or 2.5D shots as the script needs: a lit globe with the location pin, an extruded chart, a timeline ribbon, a quote card (quotes under 15 words, attributed) or a photo. Then return to the brief.
+
+**Photos (when the user uploaded them).** Show each one as a glossy print in the same world: clipped to the brief or lying on the desk, lit by the same gobo and key light, with a slow push-in or a gentle slide across it (never a static slide). A full-frame photo is allowed for a hero moment, with the same grade and grain. Put a small credit line on it ("Photo: …") and a name caption for any person shown. Keep faces clear of captions, labels and the safe-zone edges. Never alter a person's face or body, and never put a real person into a scene they weren't in.
 
 **Intro sting:** shadows sweep across a blank sheet, the channel name inks on with trails, the date ticks in, and the camera pulls back. **Outro:** the brief folds into a plane that flies toward a subscribe card.
 
@@ -175,12 +216,15 @@ Keep each transition to 2–3 s. Vary the flight path every time, and vary the p
 
 ## Phase 2: Build
 
-1. Read the engine sections listed at the top. Set up or reuse the Remotion project and build the reusable components once: `NewsBrief`, `GoboLight`, `KineticHeadline`, `TrailWord`, `CheckTick`, `PaperPlaneFold`, `CategoryWorld`, `GlobePin`, `BigNumber`, `QuoteCard`, `TitleSting`, `Outro`.
+1. Read `references/engine.md`. Set up or reuse the Remotion project and build the reusable components once: `NewsBrief`, `GoboLight`, `KineticHeadline`, `TrailWord`, `CheckTick`, `PaperPlaneFold`, `CategoryWorld`, `GlobePin`, `BigNumber`, `QuoteCard`, `PhotoPrint`, `TitleSting`, `Outro`.
+   **Hero checklists:** before building each signature piece (`TitleSting`, `PaperPlaneFold`, each `CategoryWorld`, `Outro`, the thumbnail and each Short's first 3 s), write its checklist with `references/hero_checklist.md`, or re-use the saved one if the piece already exists and isn't changing.
+   **Reference animation:** if the user sent one, follow `references/reference_matching.md` before building the piece it's for: break it down, write the motion spec, build it into that component, and compare until every row passes (±0.08 s, at most 5 rounds). A link is downloaded only with the user's OK, into its own folder, and the reference is never published.
+   If the user uploaded images, copy them into `anim/public/photos/`, check each one opens and is at least 1280 px on its long side (tell the user about any that are too small), and log each with its credit line in `sources/sources.csv`.
 2. Measure the clips, transcribe them for word timings (faster-whisper), and build `timeline.json`.
 3. Write the storyboard from the Phase 1 scene plan.
 4. Render test stills at the busiest moments at full size and look at them. Check the light, focus, readability and that frames aren't blank.
 5. Render:
-   - the long-form video at 1920×1080, 30 fps (60 fps for the transition flights if render time allows), H.264 + AAC
+   - the long-form video at the chosen length, 1920×1080, 30 fps (60 fps for the transition flights if render time allows), H.264 + AAC
    - 2 Shorts at 1080×1920
    - a 1280×720 thumbnail rendered as a still from the 3D world: the brief under dramatic light with a 3–5 word headline
 6. Do the sound pass and mix (see Sound design), then assemble with FFmpeg and finalize the chapter timestamps.
@@ -189,9 +233,10 @@ Keep each transition to 2–3 s. Vary the flight path every time, and vary the p
 
 **Visual rules.** These are always required.
 
-- Use only original graphics generated in code.
-- **Never** use news-outlet footage, photos, logos or screenshots. Never use photos or likenesses of real people, and never use team, league or brand logos. Show names as text.
-- Credit sources as on-screen text and in the description.
+- Everything on screen is original graphics generated in code, plus the photos the user uploaded.
+- Photos of real people are fine when the user supplied them. Claude never takes photos, footage or screenshots from news sites itself, never edits a real person's face or body, and never makes a real person appear somewhere they weren't.
+- Never use news-outlet logos, watermarks or broadcast footage, or team, league or brand logos. Show names as text.
+- Credit sources and photos as on-screen text and in the description.
 
 ---
 
@@ -203,6 +248,8 @@ Keep each transition to 2–3 s. Vary the flight path every time, and vary the p
   - focus lands on the hero word
   - there's no flicker and no blank WebGL frames
   - captions are in sync and clear of the Shorts UI zones
+- Every hero checklist is graded (yes / partial / no, measured or eyeballed) and every reference spec row passes, or the user has been told which rows still fail and why.
 - Run the director self-check (`references/director.md`): every scene changes on a spoken beat, there's one clear focus per shot, and nothing is static for more than ~4 s.
-- Confirm that the durations match the audio, every clip was used, and the loudness is about -14 LUFS.
+- Confirm that the durations match the audio, the long form is close to the chosen length, every clip was used, and the loudness is about -14 LUFS.
+- Every uploaded photo is used where planned, credited on screen and in the description, and sharp at 1080p.
 - Deliver the long-form MP4, 2 Short MP4s, the thumbnail PNG and the final metadata.

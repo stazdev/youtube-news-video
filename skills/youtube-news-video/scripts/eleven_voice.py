@@ -1,39 +1,36 @@
 #!/usr/bin/env python3
-"""ElevenLabs narration from the channel's production script.
+"""ElevenLabs narration for a news episode: one clip per .txt script, using the user's own API key.
 
-Reads the "Voice script for Eleven v4" section of a production script (PDF, .txt or .md),
-splits it into the named chunks (voice_01_ch0.mp3 ...), generates each chunk with the
-channel voice, checks every take with Whisper and joins them with chapter gaps.
+Reads every <name>.txt in the episode's scripts folder (00_intro, 01_story ... 99_outro, short_A, short_B),
+generates <name>.mp3 with the channel voice, then checks each take with Whisper (does it say the script?)
+and librosa (is it as loud as the others?).
 
-Run with the project's venv:  .venv/bin/python -I <skill>/scripts/eleven_voice.py <command> ...
+Run from the project root with its venv:  .venv/bin/python -I <skill>/scripts/eleven_voice.py <command> ...
 
-  plan     <script>                         parse only, list chunks + character count (free)
-  generate <script> --out DIR [--only ch0,ch3] [--force] [--yes] [--no-check]
-                                            generate missing chunks (costs credits)
-  check    <script> --out DIR               Whisper/loudness checks on existing chunks
-  join     <script> --out DIR [--gap 1.3]   trimmed chunks + gaps -> DIR/voice.mp3 + voice_chunks.json
+  voices                                    list the voices in the user's ElevenLabs library (free)
+  plan     SCRIPTS_DIR                      list clips, character counts and the total (free)
+  generate SCRIPTS_DIR --out AUDIO_DIR [--only 01_story,short_A] [--force] [--yes] [--voice ID_OR_NAME]
+                                            generate missing clips (costs credits), then check them
+  check    SCRIPTS_DIR --out AUDIO_DIR      re-run the checks on existing clips (e.g. ones the user recorded)
 
-Voice settings come from settings.json -> "voice" (project root). A line in the script's
-production notes overrides them for that video:
-  VOICE: <voice id or name> [· stability 50 · similarity 75 · style 0 · model eleven_v4]
-The API key is read from ELEVENLABS_API_KEY (environment or keys.env). It is never printed.
+Voice settings: settings.json -> "voice" in the project root (voice_id, model_id, stability, similarity_boost,
+style, use_speaker_boost, output_format, optional speed and seed). --voice overrides the voice for this run.
+The API key is ELEVENLABS_API_KEY (environment or keys.env, found by walking up from the current folder).
+It is never printed. Results: AUDIO_DIR/voice_report.json.
 """
-import argparse, difflib, json, os, re, subprocess, sys, unicodedata, urllib.request, urllib.error
+import argparse, difflib, json, os, re, subprocess, sys, unicodedata, urllib.error, urllib.request
 from pathlib import Path
 
 API = "https://api.elevenlabs.io/v1"
 DEFAULT_VOICE = {"voice_id": "", "model_id": "eleven_v4", "stability": 0.5, "similarity_boost": 0.75,
-                 "style": 0.0, "use_speaker_boost": True, "output_format": "mp3_44100_128",
-                 "chapter_gap_s": 1.3, "part_gap_s": 0.5, "max_retries": 2}
-CHUNK_RE = re.compile(r"^\s*(voice_[A-Za-z0-9_]+\.mp3)\s*[:\-–—]\s*(.*)$")
-END_RE = re.compile(r"^\s*(Checks after generating|Fact check|Upload pack|\d+\.\s+Fact check)", re.I)
-FOOTER_RE = re.compile(r"^\s*(.*\(Production Script\)\s*|Page \d+ of \d+\s*)$")
-TAG_RE = re.compile(r"\[([^\]]+)\]")
+                 "style": 0.0, "use_speaker_boost": True, "output_format": "mp3_44100_128"}
+MAX_RETAKES = 2
+MIN_MATCH = 0.85
+LETTER_WORDS = ("ai", "uae", "ula")  # Whisper writes "AI"; the script says "A I"
 
 
-# ---------- project files ----------
-def find_up(name, start=None):
-    p = Path(start or os.getcwd()).resolve()
+def find_up(name):
+    p = Path.cwd().resolve()
     for d in [p, *p.parents]:
         if (d / name).exists():
             return d / name
@@ -42,116 +39,14 @@ def find_up(name, start=None):
 
 def api_key():
     k = os.environ.get("ELEVENLABS_API_KEY")
-    if not k:
-        kf = find_up("keys.env")
-        if kf:
-            for line in kf.read_text().splitlines():
-                if line.strip().startswith("ELEVENLABS_API_KEY="):
-                    k = line.split("=", 1)[1].strip().strip('"').strip("'")
+    kf = None if k else find_up("keys.env")
+    if kf:
+        for line in kf.read_text().splitlines():
+            if line.strip().startswith("ELEVENLABS_API_KEY="):
+                k = line.split("=", 1)[1].strip().strip('"').strip("'")
     if not k:
         sys.exit("ELEVENLABS_API_KEY not found: add it to keys.env in the project root.")
     return k
-
-
-def read_text(path):
-    path = Path(path)
-    if path.suffix.lower() == ".pdf":
-        from pypdf import PdfReader
-        return "\n".join((pg.extract_text() or "") for pg in PdfReader(str(path)).pages)
-    return path.read_text(encoding="utf-8")
-
-
-# ---------- parsing ----------
-def unwrap(lines):
-    """Undo PDF hard wraps: a line ending in a space (or a hyphen before a lowercase word) continues."""
-    out = []
-    for raw in lines:
-        if FOOTER_RE.match(raw) or not raw.strip():
-            if not raw.strip():
-                out.append("")
-            continue
-        prev = out[-1] if out else ""
-        if prev and (prev.endswith(" ") or prev.rstrip()[-1:] not in '.?!…:;"\')]’”' or prev.endswith("-")):
-            out[-1] = (out[-1] if out[-1].endswith("-") else out[-1].rstrip() + " ") + raw.strip()
-        else:
-            out.append(raw.rstrip(" ") + (" " if raw.endswith(" ") else ""))
-    return [l.strip() for l in out if l.strip()]
-
-
-def parse_script(text):
-    lines = text.splitlines()
-    start = next((i for i, l in enumerate(lines) if re.search(r"voice script", l, re.I) and not CHUNK_RE.match(l)
-                  and any(CHUNK_RE.match(x) for x in lines[i:i + 40])), None)
-    if start is None:
-        start = next((i for i, l in enumerate(lines) if CHUNK_RE.match(l)), None)
-    if start is None:
-        sys.exit("No voice chunks found (expected lines like 'voice_01_ch0.mp3 : cold open').")
-    chunks, cur = [], None
-    for l in lines[start:]:
-        if END_RE.match(l):
-            break
-        m = CHUNK_RE.match(l)
-        if m:
-            cur = {"file": m.group(1), "label": m.group(2).strip(), "raw": []}
-            chunks.append(cur)
-        elif cur is not None:
-            cur["raw"].append(l)
-    for c in chunks:
-        c["text"] = "\n".join(unwrap(c.pop("raw")))
-        c["chars"] = len(c["text"])
-        c["chapter"] = chapter_key(c["file"])
-
-    # production notes: VOICE override, IPA fixes, listen-check words
-    notes = "\n".join(lines[:start])
-    full = re.sub(r"\s+", " ", text)
-    ipa = {}
-    for w, p in re.findall(r"([A-Za-z][\wáéíóúñü\-]+)\s*/\s*([^/,]{2,40}?)\s*/", full):
-        p = p.replace(" ", "")
-        if re.search(r"[ˈˌəɑɒɪʊʒʃθðŋɡːæɛɔ]", p):
-            ipa[w] = p
-    listen = []
-    m = re.search(r"listen for (.+?);", full)
-    if m:
-        listen = re.findall(r"[\"“]([^\"”]+)[\"”]", m.group(1))
-    override = {}
-    vm = re.search(r"^\s*VOICE\s*:\s*(.+)$", notes, re.M)
-    if vm:
-        parts = [p.strip() for p in re.split(r"[·|,;]", vm.group(1)) if p.strip()]
-        override["voice"] = parts[0]
-        for p in parts[1:]:
-            kv = re.match(r"(stability|similarity|style|model|speed)\s*[:=]?\s*(\S+)", p, re.I)
-            if kv:
-                k, v = kv.group(1).lower(), kv.group(2)
-                if k == "model":
-                    override["model_id"] = v
-                else:
-                    f = float(v)
-                    override[{"similarity": "similarity_boost"}.get(k, k)] = f / 100 if f > 1 and k != "speed" else f
-    return {"chunks": chunks, "ipa": ipa, "listen": listen, "override": override}
-
-
-def chapter_key(fname):
-    m = re.search(r"_ch(\d+)", fname)
-    return m.group(1) if m else fname
-
-
-# ---------- settings ----------
-def voice_settings(plan):
-    s = dict(DEFAULT_VOICE)
-    sf = find_up("settings.json")
-    if sf:
-        s.update(json.loads(sf.read_text()).get("voice", {}))
-    ov = dict(plan["override"])
-    if "voice" in ov:
-        v = ov.pop("voice")
-        if re.fullmatch(r"[A-Za-z0-9]{20}", v):
-            s["voice_id"], s["voice_name"] = v, ""
-        else:
-            s["voice_id"], s["voice_name"] = resolve_voice_name(v), v
-    s.update(ov)
-    if not s.get("voice_id"):
-        sys.exit("No voice set: add \"voice\": {\"voice_id\": ...} to settings.json or a VOICE: line to the script.")
-    return s
 
 
 def http(method, url, body=None, accept="application/json"):
@@ -161,237 +56,199 @@ def http(method, url, body=None, accept="application/json"):
         with urllib.request.urlopen(req, timeout=300) as r:
             return r.read()
     except urllib.error.HTTPError as e:
-        msg = e.read().decode(errors="replace")[:400]
-        sys.exit(f"ElevenLabs error {e.code}: {msg}")
+        sys.exit(f"ElevenLabs error {e.code}: {e.read().decode(errors='replace')[:400]}")
 
 
-def resolve_voice_name(name):
-    data = json.loads(http("GET", f"{API}/voices?show_legacy=true"))
-    hits = [v for v in data.get("voices", []) if v["name"].lower().startswith(name.lower())]
-    if len(hits) == 1:
-        return hits[0]["voice_id"]
-    if not hits:
-        sys.exit(f"No voice named '{name}' in this ElevenLabs account. Use the voice ID instead.")
-    sys.exit("Several voices match '%s': %s. Use the voice ID." % (name, ", ".join(f"{v['name']} ({v['voice_id']})" for v in hits)))
+def settings(voice=None):
+    s = dict(DEFAULT_VOICE)
+    sf = find_up("settings.json")
+    if sf:
+        s.update(json.loads(sf.read_text()).get("voice", {}))
+    if voice:
+        s["voice_id"] = voice if re.fullmatch(r"[A-Za-z0-9]{20}", voice) else voice_by_name(voice)
+    if not s.get("voice_id"):
+        sys.exit("No voice set: add settings.json -> voice.voice_id in the project root, or pass --voice.")
+    return s
 
 
-def tts(text, s, out_path):
-    url = f"{API}/text-to-speech/{s['voice_id']}?output_format={s['output_format']}"
-    body = {"text": text, "model_id": s["model_id"],
-            "voice_settings": {k: s[k] for k in ("stability", "similarity_boost", "style", "use_speaker_boost") if k in s}}
+def voice_by_name(name):
+    vs = json.loads(http("GET", f"{API}/voices")).get("voices", [])
+    hits = [v for v in vs if v["name"].lower().startswith(name.lower())]
+    if len(hits) != 1:
+        sys.exit(f"{len(hits)} voices match '{name}': " + ", ".join(f"{v['name']} ({v['voice_id']})" for v in hits))
+    return hits[0]["voice_id"]
+
+
+def clips(scripts_dir, only=None):
+    files = sorted(Path(scripts_dir).glob("*.txt"))
+    if only:
+        want = {x.strip() for x in only.split(",")}
+        files = [f for f in files if f.stem in want]
+    if not files:
+        sys.exit(f"No matching .txt scripts in {scripts_dir}")
+    return [(f.stem, " ".join(f.read_text().split())) for f in files]
+
+
+def tts(text, s, out):
+    vs = {k: s[k] for k in ("stability", "similarity_boost", "style", "use_speaker_boost") if k in s}
     if s.get("speed"):
-        body["voice_settings"]["speed"] = s["speed"]
+        vs["speed"] = s["speed"]
+    body = {"text": text, "model_id": s["model_id"], "voice_settings": vs}
     if s.get("seed") is not None:
         body["seed"] = s["seed"]
-    audio = http("POST", url, body, accept="audio/mpeg")
-    Path(out_path).write_bytes(audio)
+    out.write_bytes(http("POST", f"{API}/text-to-speech/{s['voice_id']}?output_format={s['output_format']}", body, "audio/mpeg"))
 
 
 # ---------- checks ----------
 _model = None
+ONES = ("zero one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen "
+        "sixteen seventeen eighteen nineteen").split()
+TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
 
 
-def load_audio(path, sr=16000):
+def spell(n):
+    if n < 20:
+        return [ONES[n]]
+    if n < 100:
+        return [TENS[n // 10]] + ([ONES[n % 10]] if n % 10 else [])
+    if 1100 <= n <= 1999 and n % 100:
+        return spell(n // 100) + spell(n % 100)
+    w = []
+    if n >= 1000:
+        w += spell(n // 1000) + ["thousand"]; n %= 1000
+    if n >= 100:
+        w += [ONES[n // 100], "hundred"]; n %= 100
+    return w + (spell(n) if n else [])
+
+
+def words(s):
+    """Lower-case word tokens. Whisper's digits become spoken words and 'AI' / 'U.S.' become letters,
+    so they match a script written for the voice ('forty', 'A I', 'U S')."""
+    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().lower().replace("-", " ")
+    s = re.sub(r"\b([a-z])\.", r"\1 ", s)
+    out = []
+    for t in re.findall(r"[a-z0-9']+", s):
+        if t.isdigit() and len(t) <= 4:
+            out += spell(int(t))
+        elif t in LETTER_WORDS:
+            out += list(t)
+        else:
+            out.append(t)
+    return out
+
+
+def load(path, sr):
     import numpy as np
     raw = subprocess.run(["ffmpeg", "-v", "quiet", "-i", str(path), "-f", "f32le", "-ac", "1", "-ar", str(sr), "-"],
                          capture_output=True, check=True).stdout
     return np.frombuffer(raw, dtype=np.float32)
 
 
-def transcribe(path):
+def similarity(a, b):
+    # "us" is ambiguous (the word vs the letters U S), so also compare with both readings removed
+    plain = difflib.SequenceMatcher(None, a, b, autojunk=False).ratio()
+    drop = lambda ws: [w for w in ws if w not in ("u", "s", "us")]
+    return max(plain, difflib.SequenceMatcher(None, drop(a), drop(b), autojunk=False).ratio())
+
+
+def check(path, text):
     global _model
+    import numpy as np, librosa
     from faster_whisper import WhisperModel
     if _model is None:
         _model = WhisperModel("small", device="cpu", compute_type="int8")
-    segs, _ = _model.transcribe(load_audio(path), language="en", beam_size=5)
-    return " ".join(s.text for s in segs).strip()
-
-
-def norm(s):
-    s = unicodedata.normalize("NFKD", s).encode("ascii", "ignore").decode().lower()
-    return re.findall(r"[a-z0-9']+", s)
-
-
-def word_present(word, heard_words):
-    w = "".join(norm(word))
-    for n in (1, 2):
-        for i in range(len(heard_words) - n + 1):
-            if difflib.SequenceMatcher(None, w, "".join(heard_words[i:i + n])).ratio() >= 0.75:
-                return True
-    return False
-
-
-def check_chunk(path, chunk, plan):
-    heard = transcribe(path)
-    hw, spoken = norm(heard), norm(TAG_RE.sub(" ", chunk["text"]))
-    issues = []
-    # bracketed tag read aloud: tag words heard that the narration itself doesn't contain
-    for tag in TAG_RE.findall(chunk["text"]):
-        tw = [w for w in norm(tag) if len(w) > 3 and w not in spoken]
-        if tw and sum(w in hw for w in tw) >= max(1, len(tw) // 2 + (len(tw) > 2)):
-            issues.append(("tag_read", tag))
-    for w in set(plan["listen"]) | set(plan["ipa"]):
-        if "".join(norm(w)) in "".join(spoken) and not word_present(w, hw):
-            issues.append(("word", w))
-    ratio = difflib.SequenceMatcher(None, " ".join(spoken), " ".join(hw)).ratio()
-    if ratio < 0.85:
-        issues.append(("mismatch", f"{ratio:.2f}"))
-    return {"heard": heard, "match": round(ratio, 3), "issues": issues, **loudness(path)}
-
-
-def loudness(path):
-    import numpy as np, librosa
-    y = load_audio(path, 22050)
+    segs, _ = _model.transcribe(load(path, 16000), language="en", beam_size=5)
+    heard = " ".join(x.text for x in segs).strip()
+    y = load(path, 22050)
     parts = librosa.effects.split(y, top_db=35)
-    speech = np.concatenate([y[a:b] for a, b in parts]) if len(parts) else y
-    rms = float(np.sqrt(np.mean(speech ** 2)) + 1e-9)
-    return {"dur_s": round(len(y) / 22050, 2), "speech_dbfs": round(20 * np.log10(rms), 1),
+    sp = np.concatenate([y[i:j] for i, j in parts]) if len(parts) else y
+    return {"heard": heard, "match": round(similarity(words(text), words(heard)), 3), "dur_s": round(len(y) / 22050, 2),
+            "speech_dbfs": round(float(20 * np.log10(np.sqrt(np.mean(sp ** 2)) + 1e-9)), 1),
             "peak": round(float(np.max(np.abs(y))), 3)}
 
 
-def apply_ipa(text, words, ipa):
-    for w in words:
-        if w in ipa:
-            text = re.sub(rf"\b{re.escape(w)}\b", f"/{ipa[w]}/", text)
-    return text
+def report(out, results):
+    import statistics
+    if len(results) > 1:
+        med = statistics.median(r["speech_dbfs"] for r in results.values())
+        for r in results.values():
+            r["loudness_off_db"] = round(r["speech_dbfs"] - med, 1)
+    flags = []
+    for name, r in results.items():
+        if r["match"] < MIN_MATCH:
+            flags.append(f"{name}: transcript match {r['match']} < {MIN_MATCH} (heard: \"{r['heard']}\")")
+        if abs(r.get("loudness_off_db", 0)) > 3:
+            flags.append(f"{name}: {r['loudness_off_db']:+} dB from the other clips")
+        if r["peak"] >= 0.99:
+            flags.append(f"{name}: clipping (peak {r['peak']})")
+    (out / "voice_report.json").write_text(json.dumps({"clips": results, "flags": flags}, indent=2))
+    for name, r in results.items():
+        print(f"  {name:10} {r['dur_s']:6.2f} s  match {r['match']:.2f}  {r['speech_dbfs']:6.1f} dBFS")
+    print("flags:" if flags else "no flags", *flags, sep="\n  ")
+    return flags
 
 
 # ---------- commands ----------
+def cmd_voices(a):
+    for v in json.loads(http("GET", f"{API}/voices")).get("voices", []):
+        labels = v.get("labels") or {}
+        print(f"{v['voice_id']}  {v['name']}  [{v.get('category')}]  " + ", ".join(str(x) for x in labels.values() if x))
+
+
 def cmd_plan(a):
-    plan = parse_script(read_text(a.script))
-    s = voice_settings(plan)
-    print(f"Voice: {s.get('voice_name') or ''} {s['voice_id']} · model {s['model_id']} · stability {s['stability']}"
-          f" · similarity {s['similarity_boost']} · style {s['style']} · {s['output_format']}")
-    total = 0
-    for c in plan["chunks"]:
-        total += c["chars"]
-        flag = "  <-- over 2,500" if c["chars"] > 2500 else ""
-        print(f"  {c['file']:<22} {c['chars']:>5} chars  {c['label']}{flag}")
-    print(f"Total: {len(plan['chunks'])} chunks, {total:,} characters (about {total:,} credits, more for retakes).")
-    if plan["ipa"]:
-        print("IPA fixes:", ", ".join(f"{k} /{v}/" for k, v in plan["ipa"].items()))
-    if plan["listen"]:
-        print("Listen-check words:", ", ".join(plan["listen"]))
-    if a.json:
-        Path(a.json).write_text(json.dumps({"settings": s, **plan}, indent=2, ensure_ascii=False))
-
-
-def selected(plan, only):
-    if not only:
-        return plan["chunks"]
-    keys = {o.strip() for o in only.split(",")}
-    return [c for c in plan["chunks"] if c["file"] in keys or c["file"][:-4].rsplit("_", 1)[-1] in keys]
+    s = settings(a.voice)
+    cs = clips(a.scripts)
+    print(f"voice {s.get('voice_name', '')} {s['voice_id']} · model {s['model_id']} · stability {s['stability']} "
+          f"· similarity {s['similarity_boost']} · style {s['style']}")
+    for n, t in cs:
+        print(f"  {n:10} {len(t):5} chars  {len(t.split()):4} words")
+    print(f"total {sum(len(t) for _, t in cs)} characters (≈ credits)")
 
 
 def cmd_generate(a):
-    plan = parse_script(read_text(a.script))
-    s = voice_settings(plan)
+    s = settings(a.voice)
+    cs = clips(a.scripts, a.only)
     out = Path(a.out); out.mkdir(parents=True, exist_ok=True)
-    todo = [c for c in selected(plan, a.only) if a.force or not (out / c["file"]).exists()]
-    chars = sum(c["chars"] for c in todo)
+    todo = {n for n, _ in cs if a.force or not (out / f"{n}.mp3").exists()}
     if not todo:
-        print("Nothing to generate (all chunks exist; use --force to redo)."); return
-    if len(todo) > 1 and not a.yes:
-        sys.exit(f"{len(todo)} chunks, {chars:,} characters. Re-run with --yes after the user approves.")
-    rp = out / "voice_report.json"
-    report = json.loads(rp.read_text()) if rp.exists() else {}
-    for c in todo:
-        dst = out / c["file"]
-        text, tries, note = c["text"], 0, ""
-        while True:
-            print(f"Generating {c['file']} ({len(text)} chars){' ' + note if note else ''} ...", flush=True)
-            tts(text, s, dst)
-            if a.no_check:
-                break
-            r = check_chunk(dst, c, plan)
-            tags = [v for k, v in r["issues"] if k == "tag_read"]
-            words = [v for k, v in r["issues"] if k == "word"]
-            if not (tags or words) or tries >= s["max_retries"]:
-                break
-            tries += 1
-            if tags:
-                note = "retake: a tag was read aloud"
-                if tries == s["max_retries"]:  # last try: drop the offending tags
-                    for t in tags:
-                        text = text.replace(f"[{t}]", "")
-            else:
-                fix = [w for w in words if w in plan["ipa"]]
-                if tries >= 2 and fix:
-                    text, note = apply_ipa(text, fix, plan["ipa"]), "retake with IPA for " + ", ".join(fix)
-                else:
-                    note = "retake: check " + ", ".join(words)
-        if not a.no_check:
-            r["retakes"], r["text_sent"] = tries, (text if text != c["text"] else None)
-            report[c["file"]] = r
-            print(f"   match {r['match']:.2f} · {r['dur_s']} s · {r['speech_dbfs']} dBFS · issues: "
-                  f"{', '.join(f'{k}:{v}' for k, v in r['issues']) or 'none'}")
-    if not a.no_check:
-        rp.write_text(json.dumps(report, indent=2, ensure_ascii=False))
-        energy_check(report)
-
-
-def energy_check(report):
-    vals = {f: r["speech_dbfs"] for f, r in report.items() if "speech_dbfs" in r}
-    if len(vals) < 2:
-        return
-    import statistics
-    med = statistics.median(vals.values())
-    odd = [f"{f} ({v - med:+.1f} dB)" for f, v in vals.items() if abs(v - med) > 3]
-    print("Energy check:", ("takes differ from the others: " + ", ".join(odd)) if odd else "all takes within 3 dB.")
+        print("all clips exist (use --force to redo)")
+    elif not a.yes:
+        chars = sum(len(t) for n, t in cs if n in todo)
+        sys.exit(f"{len(todo)} clips, {chars} characters. Re-run with --yes to spend the credits.")
+    results = {}
+    for n, t in cs:
+        p = out / f"{n}.mp3"
+        if n in todo:
+            for take in range(MAX_RETAKES + 1):
+                print(f"generating {n} (take {take + 1}) ...", flush=True)
+                tts(t, s, p)
+                r = check(p, t)
+                if r["match"] >= MIN_MATCH:
+                    break
+                print(f"  match {r['match']}: retaking", flush=True)
+        else:
+            r = check(p, t)
+        results[n] = r
+    report(out, results)
 
 
 def cmd_check(a):
-    plan = parse_script(read_text(a.script))
-    out = Path(a.out); report = {}
-    for c in plan["chunks"]:
-        p = out / c["file"]
-        if not p.exists():
-            print(f"  {c['file']}: missing"); continue
-        r = report[c["file"]] = check_chunk(p, c, plan)
-        print(f"  {c['file']}: match {r['match']:.2f} · {r['dur_s']} s · {r['speech_dbfs']} dBFS · peak {r['peak']} · "
-              f"issues: {', '.join(f'{k}:{v}' for k, v in r['issues']) or 'none'}")
-    (out / "voice_report.json").write_text(json.dumps(report, indent=2, ensure_ascii=False))
-    energy_check(report)
-
-
-def cmd_join(a):
-    import numpy as np, librosa, soundfile as sf
-    plan = parse_script(read_text(a.script))
-    s = voice_settings(plan)
-    gap = a.gap if a.gap is not None else s["chapter_gap_s"]
-    out, sr = Path(a.out), 44100
-    pieces, timeline, t, prev = [], [], 0.0, None
-    for c in plan["chunks"]:
-        p = out / c["file"]
-        if not p.exists():
-            sys.exit(f"Missing {p}; generate it first.")
-        y = load_audio(p, sr)
-        _, (a0, b0) = librosa.effects.trim(y, top_db=40)
-        y = y[max(0, a0 - int(0.08 * sr)): min(len(y), b0 + int(0.15 * sr))]
-        if prev is not None:
-            g = s["part_gap_s"] if c["chapter"] == prev else gap
-            pieces.append(np.zeros(int(g * sr), dtype=np.float32)); t += g
-        timeline.append({"file": c["file"], "label": c["label"], "start_s": round(t, 3), "end_s": round(t + len(y) / sr, 3)})
-        pieces.append(y); t += len(y) / sr; prev = c["chapter"]
-    wav = out / "voice.wav"
-    sf.write(wav, np.concatenate(pieces), sr)
-    subprocess.run(["ffmpeg", "-v", "quiet", "-y", "-i", str(wav), "-b:a", "192k", str(out / "voice.mp3")], check=True)
-    (out / "voice_chunks.json").write_text(json.dumps(timeline, indent=2, ensure_ascii=False))
-    print(f"Joined {len(timeline)} chunks -> {out / 'voice.mp3'} ({t:.1f} s, chapter gap {gap} s, part gap {s['part_gap_s']} s)")
+    out = Path(a.out)
+    results = {n: check(out / f"{n}.mp3", t) for n, t in clips(a.scripts) if (out / f"{n}.mp3").exists()}
+    report(out, results)
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("plan"); p.add_argument("script"); p.add_argument("--json")
-    g = sub.add_parser("generate"); g.add_argument("script"); g.add_argument("--out", required=True)
+    sub.add_parser("voices")
+    p = sub.add_parser("plan"); p.add_argument("scripts"); p.add_argument("--voice")
+    g = sub.add_parser("generate"); g.add_argument("scripts"); g.add_argument("--out", required=True)
     g.add_argument("--only"); g.add_argument("--force", action="store_true"); g.add_argument("--yes", action="store_true")
-    g.add_argument("--no-check", action="store_true")
-    c = sub.add_parser("check"); c.add_argument("script"); c.add_argument("--out", required=True)
-    j = sub.add_parser("join"); j.add_argument("script"); j.add_argument("--out", required=True)
-    j.add_argument("--gap", type=float)
+    g.add_argument("--voice")
+    c = sub.add_parser("check"); c.add_argument("scripts"); c.add_argument("--out", required=True)
     a = ap.parse_args()
-    {"plan": cmd_plan, "generate": cmd_generate, "check": cmd_check, "join": cmd_join}[a.cmd](a)
+    {"voices": cmd_voices, "plan": cmd_plan, "generate": cmd_generate, "check": cmd_check}[a.cmd](a)
 
 
 if __name__ == "__main__":

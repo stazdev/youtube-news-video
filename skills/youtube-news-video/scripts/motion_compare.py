@@ -21,7 +21,6 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-SMALL = (192, 108)
 
 
 def load(d):
@@ -115,7 +114,7 @@ def main():
     ap.add_argument("--pixel", type=float, default=0.12, help="per-pixel difference that counts as a mismatch (0-1)")
     a = ap.parse_args()
     out = Path(a.out); (out / "sheets").mkdir(parents=True, exist_ok=True)
-    mr, fr, br, sr = load(a.ref); mo, fo, bo, so = load(a.ours)
+    mr, fr, br, sr = load(a.ref); mo, _, bo, so = load(a.ours)
     warn = []
     if abs(mr["fps"] - mo["fps"]) > 1e-3: warn.append(f"fps differ: {mr['fps']} vs {mo['fps']} (re-extract ours with --like)")
     if mr.get("frame_size") != mo.get("frame_size"): warn.append(f"frame sizes differ: {mr.get('frame_size')} vs {mo.get('frame_size')} (ours is resized for the comparison)")

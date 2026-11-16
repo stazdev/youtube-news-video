@@ -141,7 +141,6 @@ def main():
             ds, de, dd = r2["start"] - r["start"], r2["end"] - r["end"], r2["dur"] - r["dur"]
             rel = (r2["travel"] / r["travel"] - 1) * 100 if r["travel"] else 0
             ok = abs(ds) <= a.tol and abs(de) <= a.tol and abs(dd) <= a.tol
-            fam_ok = r["family"].split("(")[0].replace("In", "").replace("Out", "")[:4] == r2["family"].split("(")[0].replace("In", "").replace("Out", "")[:4]
             print(f"difference: start {ds:+.3f} s, end {de:+.3f} s, duration {dd:+.3f} s, travel {rel:+.0f}% of the reference, "
                   f"overshoot {r2['overshoot_pct'] - r['overshoot_pct']:+.1f} pts -> timing {'PASS' if ok else 'FAIL'} (±{a.tol} s)"
                   + ("" if (r['family'] == r2['family']) else f"; easing differs ({r['family']} vs {r2['family']})"))

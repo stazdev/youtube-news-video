@@ -125,6 +125,13 @@ def phone_sheet(path, dur, dest):
         sheet.save(dest)
 
 
+def subject_contrast(f):
+    """How far the subject stands out from the background, in either direction: light text on a dark
+    frame (99.7th percentile above the median) or dark ink on a light page (0.3rd percentile below it)."""
+    p03, p50, p997 = np.percentile(f, (0.3, 50, 99.7))
+    return max(p997 - p50, p50 - p03)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("video"); ap.add_argument("--out", required=True)
@@ -141,24 +148,30 @@ def main():
     cuts = []
     if a.timeline:
         tl = json.loads(Path(a.timeline).read_text()); tfps = tl.get("fps", fps)
-        for s in tl.get("scenes", []):
-            cuts.append(s["startFrame"] / tfps)
+        if "sting" in tl:
+            cuts.append(tl["sting"]["dur"] / tfps)
+        # "scenes" with startFrame/beats, or the news "segments" with start, shots and plane flights
+        for s in tl.get("scenes", []) + tl.get("segments", []):
+            s0 = s.get("startFrame", s.get("start", 0))
+            cuts.append(s0 / tfps)
+            cuts += [(s0 + sh["start"]) / tfps for sh in s.get("shots", [])[1:]]
+            if s.get("flight"):
+                cuts += [s["flight"]["start"] / tfps, (s["flight"]["start"] + s["flight"]["dur"]) / tfps]
             for k, v in (s.get("beats") or {}).items():
                 if k.lower().startswith("hold"):
-                    holds.append(((s["startFrame"] + v) / tfps, (s["startFrame"] + v) / tfps + a.freeze * 2))
+                    holds.append(((s0 + v) / tfps, (s0 + v) / tfps + a.freeze * 2))
     res = {"file": str(a.video), "fps": round(fps, 3), "duration": round(dur, 2), "frames": n, "checks": []}
 
     def add(name, level, msg, t=None):
         res["checks"].append({"check": name, "level": level, "t": t, "msg": msg})
 
     # frame 0 / thumbnail
-    p50, p997 = np.percentile(L[0], 50), np.percentile(L[0], 99.7)
-    if p997 - p50 < 0.25:
+    sc0 = subject_contrast(L[0])
+    if sc0 < 0.25:
         add("frame0", "WARN" if inside(0, fades) else "FAIL",
-            f"opening frame is nearly empty (subject contrast {p997 - p50:.2f}); fine only if the video opens with a deliberate fade", 0.0)
+            f"opening frame is nearly empty (subject contrast {sc0:.2f}); fine only if the video opens with a deliberate fade", 0.0)
     # frame differences
     d = np.abs(np.diff(g, axis=0)).mean(axis=(1, 2))  # d[i] = change from frame i to i+1
-    med = float(np.median(d[d > 0])) if np.any(d > 0) else 0.0
     for i in range(1, len(d) - 1):
         t = round((i + 1) / fps, 3)
         # flash: frame i+1 differs from both neighbours while i and i+2 match
@@ -171,7 +184,7 @@ def main():
                 continue
             add("pop", "WARN", f"sudden jump in change ({d[i]:.3f} vs {d[i-1]:.3f}/{d[i+1]:.3f}); a cut is fine if planned", t)
     # empty frames mid-film
-    sc = np.array([np.percentile(f, 99.7) - np.percentile(f, 50) for f in L])
+    sc = np.array([subject_contrast(f) for f in L])
     empty = sc < 0.25
     for s, e in runs(empty):
         t0, t1 = s / fps, (e + 1) / fps

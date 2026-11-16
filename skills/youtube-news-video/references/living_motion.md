@@ -1,15 +1,15 @@
 # Living motion: worlds that feel alive, moves that never stop dead
 
 Numbers and rules adapted from rossark0/rossark-motion-skill (MIT); code below is our own. Use with
-`channel_lessons.md` row 6 ("processes are shown happening, not as still objects").
+`channel_lessons.md` (engine section 3).
 
 ## Rules
 1. **A process is always visibly happening** while it's on screen: smoke rises, water flows, plumes billow, clouds drift. Use the recipes below; never a frozen prop in a "living" place.
 2. **Never pass through an empty or dark frame.** A transition between two states or scenes overlaps them (the outgoing one is still ≥ 30-50% visible when the incoming one reaches 50%). `scripts/render_scan.py` fails any run of empty frames.
-3. **Nothing appears from scale 0.** Entrances start at 0.6-0.9 scale (or from off-frame, already moving) with a fade; scale-from-0 pops read as cheap. Exception: liquid droplets born inside a gooey filter.
+3. **Nothing appears from scale 0.** Entrances start at 0.6-0.9 scale (or from off-frame, already moving) with a fade; scale-from-0 pops read as cheap.
 4. **Chains of poses flow; they don't stop at every key.** For a camera path or a character with several key poses, use `flow()` below (passes through every key with continuous speed and never overshoots). Plain `interpolate` with easing per segment stops dead at each key and reads robotic; Catmull-Rom splines can overshoot a key (camera dips below terrain, a value goes past its target).
 5. **Follow-through by delay, not springs.** A child part reads its parent's value a little earlier: `child(t) += k · (parent(t − Δ) − parent(t))`, Δ = 60-150 ms (2-4 frames at 30 fps), k = 0.3-0.6. Tails, hair, leaves on a swaying stem, labels trailing a moving object, the second line of a title.
-6. **Moving holds.** While something is held on screen it keeps a tiny idle layer (breathing ±1-1.5%, sway of a few degrees), except text being read and the title lock-up (held completely still, row 12).
+6. **Moving holds.** While something is held on screen it keeps a tiny idle layer (breathing ±1-1.5%, sway of a few degrees), except text being read and the title lock-up (held completely still).
 7. **Variety without chaos.** Repeated items (raindrops, particles, trees, fish) get a seeded phase, period and size (`random('seed-'+i)`); nothing moves in sync and nothing is random per frame.
 8. **One main action per shot, plus two or three quiet idle loops.** Side elements stay small in amplitude ("when unsure, halve it").
 9. **Easing by role:** things that travel ease in-out `bezier(0.77, 0, 0.175, 1)`; things that arrive or open ease out `bezier(0.23, 1, 0.32, 1)`; only things leaving ease in, and exits are about half as long as entrances; endless loops (gears, conveyors, falling rain) are linear.

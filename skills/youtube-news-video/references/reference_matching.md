@@ -1,7 +1,8 @@
 # Matching a reference animation ("make it move like this")
 
-When the user gives a reference video or GIF (an intro, a transition, a title reveal, a chart animation, a scene
-from another video) and wants ours to move like it. Methods adapted from NiazMorshed2007/reanimate and
+When the user gives a reference video or GIF and wants part of the episode to move like it. `SKILL.md` asks for one
+at the end of Phase 1. Typical targets in a news episode: the intro sting, the paper-plane transition, the headline
+type-on, the hero-word trail, the keyword ticks, a big-number count-up, a chart build, the outro, or a Short's hook. Methods adapted from NiazMorshed2007/reanimate and
 rossark0/rossark-motion-skill (both MIT); the scripts are our own. All scripts run with the project venv:
 `.venv/bin/python -I <skill>/scripts/<script>.py`.
 
@@ -9,9 +10,10 @@ rossark0/rossark-motion-skill (both MIT); the scripts are our own. All scripts r
 Top of `anim/ref/<name>/spec.md`:
 - **Target:** file + time range (+ crop) exactly as the user said it ("the first 3 s", "the orb part").
 - **Fidelity:** **motion-faithful** (default): order, timing (±0.08 s), easing family, overshoot, travel relative to the
-  element's size, stagger. Our art, colours (Midnight Rose + story theme) and fonts stay ours.
+  element's size, stagger. Our art, the Cinematic Desk world, the brand palette and category accents, and our fonts stay ours.
   **Pixel-faithful** only for a private test, never for a published video: someone else's design is theirs.
-- **Destination:** which composition / component gets the motion.
+- **Destination:** which component gets the motion (`TitleSting`, `PaperPlaneFold`, `KineticHeadline`, `TrailWord`,
+  `CheckTick`, `BigNumber`, `Outro`, …). The match goes into that reusable component, so every later episode keeps it.
 A YouTube or other link: download it only with the user's OK, into its own folder; never publish the reference.
 
 ## 1. Break it down: `ref_frames.py`
@@ -44,7 +46,8 @@ the poses sheet shows *what* happens, the timing sheets show *how* (easing lives
 A "?" in a row means the frames haven't been read yet. Note what does **not** move as well.
 
 ## 4. Build
-In Remotion with our components and brand. Copy timings as frames, easings as `Easing.bezier(...)` from the fitter,
+In Remotion with our components and brand. The voice still sets the timing: a matched move keeps its measured
+duration and easing, but its start lands on our spoken beat from `timeline.json`. Copy timings as frames, easings as `Easing.bezier(...)` from the fitter,
 chains of poses with `flow()`. Map sizes relative to the element (travel as a share of its size or of the frame),
 not raw pixels, when our layout differs.
 
@@ -57,7 +60,8 @@ not raw pixels, when our layout differs.
    sheets say *what*.
 4. For each spec row: track ours the same way and `fit_easing.py REF_TRACK --prop P --from A --to B --vs OUR_TRACK`
    → per-move timing PASS/FAIL and easing family match.
-5. Fix the smallest thing the evidence points at, re-render, repeat. After 5 rounds, report any row still failing with
+5. Fix the smallest thing the evidence points at, re-render, repeat. Write the final spec rows into that component's
+   hero checklist (`references/hero_checklist.md`) so later episodes are checked against them too. After 5 rounds, report any row still failing with
    its numbers and reason; never loosen the tolerance silently.
 
 | Symptom | Usual cause | Fix |

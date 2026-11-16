@@ -3,7 +3,7 @@
 Entries 001-100 follow the user's "Filmmaker's Camera Playbook". Entries 101-130 are additions for animated explainers.
 Every shot in a video is described with codes from this file (see `director.md`).
 
-**Engines:** 2D = Remotion SVG/HTML with the CameraRig and parallax layers; 3D = Three.js (`@remotion/three`); BL = Blender (5d).
+**Engines:** 2D = Remotion SVG/HTML with the CameraRig and parallax layers; 3D = Three.js (`@remotion/three`); BL = Blender (not used by this skill; ignore that column).
 ✓ = native; ~ = approximated (2.5D trick described); ✗ = not available in that engine.
 **Units:** times in seconds; 3D distances relative to subject size S (S = the subject's bounding-sphere radius); 2D scales are camera-group scales.
 **Families** (used by the uniqueness rules): `push` (toward), `pull` (away), `travel` (lateral/along), `orbit`, `vertical`, `aerial`, `fast`, `lens`, `focus`, `reveal`, `roll`, `pov`, `static`.

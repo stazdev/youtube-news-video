@@ -1,28 +1,27 @@
 # The Director: shot design for every scene
 
-The Director runs after the composition decision (`composition_decider.md`) and timing (step 1/1b), before the storyboard.
-It turns every scene into one or more **shots**, each fully specified with codes from `camera_bible.md`, so that every
+The Director runs after timing (engine sections 4 and 4b), before the storyboard. In a news episode each story is a
+"chapter" and each shot inside it a "scene". It turns every scene into one or more **shots**, each fully specified with codes from `camera_bible.md`, so that every
 scene in every video looks deliberate, professional and different from the others.
 
 ## 1. Inputs it reads
-- `anim/direction/look.json` (format, per-scene depth and environment, palettes, energy) from the composition decider.
-- `anim/src/data/timeline.json` (scene times and beats), `voice_emphasis.json`, `voice_pauses.json` (from librosa).
-- The script's narration and `VISUALS:`/`CAMERA:` lines (a camera the user writes in the script always wins).
+- `anim/src/data/timeline.json` (scene times and beats), `voice_pace.json`, `voice_emphasis.json`, `voice_pauses.json` (from librosa).
+- The scene plan from Phase 1 and its `CAMERA:` lines (a camera the user writes in the script always wins).
 - `direction/camera_history.json` in the project root (the last videos' choices), if it exists.
 
 ## 2. The shot formula (from the user's playbook)
 Every shot = **one primary movement + one angle + one shot size + lens/focus + composition**, plus timing.
 Never stack two primary movements in one shot (secondary: breathing drift X123 or handheld M021 only).
 Write it as a code line in the storyboard, for example:
-`S04.1  M012 Crane Down · A052 High Angle · S083 EWS · 35 mm · C095 Leading Lines · 0.0-3.2 s · on "rain"`.
+`S04.1  M012 Crane Down · A052 High Angle · S083 EWS · 35 mm · C095 Leading Lines · 0.0-3.2 s · on "budget"`.
 
 ## 3. How it chooses (per scene)
 1. **Read the moment.** What is the narration doing here? Classify the scene's beat as one of:
    *establish* (new place/idea), *explain* (process, how), *reveal* (surprise, scale), *detail* (zoom into a thing),
    *journey* (movement from A to B), *compare* (two things), *list* (several items), *twist* (counter-intuitive fact),
    *payoff* (the answer), *breather* (calm moment after density), *transition* (bridge to next chapter).
-2. **Pick candidates from the emotion map** (section 4), filtered by the scene's engine (2D / 3D / Blender) using the
-   bible's ✓/~/✗ columns. `~` is allowed only with the 2.5D recipe described.
+2. **Pick candidates from the emotion map** (section 4), filtered by the scene's engine (2D or 3D) using the
+   bible's ✓/~/✗ columns (ignore the BL column). `~` is allowed only with the 2.5D recipe described.
 3. **Apply the uniqueness rules** (section 5) against everything already chosen in this video and in camera history.
 4. **Score the remaining candidates** and take the best: +3 strongest emotional match, +2 serves the spoken beat
    (the move's key moment lands on the beat word), +2 new family compared with the previous shot, +1 shot-size
@@ -30,7 +29,8 @@ Write it as a code line in the storyboard, for example:
    −2 hard to read with the scene's text/labels.
 5. **Time it to the voice.** The move's decisive moment (reveal, end of push, snap) lands within ±3 frames of the
    beat word. Calm narration (≤ 2.3 words/s or long pauses) → slower, longer moves; fast or emphatic narration
-   (emphasis words from librosa) → snap/crash/whip family, only on those words.
+   (emphasis words from librosa) → snap/crash/whip family, only on those words. The cut rate per story follows
+   `voice_pace.json` ("Pace follows the voice" in `SKILL.md`).
 6. **Write the reason.** One line per shot: why this camera for this moment. No reason, no shot.
 
 ## 4. Emotion → camera map (first choices; any bible entry with the right family may be used)
@@ -67,7 +67,7 @@ Write it as a code line in the storyboard, for example:
 8. **Motivated only:** every shot has a reason; decorative movement without a reason is rejected.
 9. **Readable:** one primary movement per shot; labels appear after the move settles and are counter-scaled; no move
    faster than ~30% of frame width per second except fast-family moves.
-10. **Screen direction:** journeys keep one direction of travel (e.g. rain → river → sea always left-to-right) unless a
+10. **Screen direction:** journeys keep one direction of travel (e.g. the paper plane always flies left-to-right through one episode) unless a
     reversal is the point.
 11. **Coverage:** a scene longer than ~7 s gets 2-3 shots (cuts or a continuous move with distinct phases), each meeting
     rules 1-10.
@@ -78,9 +78,9 @@ Write it as a code line in the storyboard, for example:
 ```json
 { "video": "<slug>", "fps": 30, "shots": [
   { "id": "S04.1", "scene": "S04", "chapter": 1, "opener": true, "moment": "establish", "engine": "3d",
-    "from": 0.0, "to": 3.2, "beat": "rain",
+    "from": 0.0, "to": 3.2, "beat": "budget",
     "movement": "M012", "angle": "A052", "size": "S083", "lens_mm": 35, "composition": "C095",
-    "focus": "deep", "transition_in": "X102", "reason": "Arrive in the storm from above before following one drop." } ] }
+    "focus": "deep", "transition_in": "X102", "reason": "Crane down onto the brief so the headline lands as the anchor says budget." } ] }
 ```
 After the video is approved, append its shots (video slug, scene type, movement, angle, size) to
 `direction/camera_history.json` in the project root.
