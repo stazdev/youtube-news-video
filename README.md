@@ -27,7 +27,7 @@ A test run from 16 November 2026, made end to end by the skill from one request 
 - Asks whether you have a reference animation you'd like any part to move like (intro, transitions, headline reveal, Shorts hook).
 
 **Phase 2: voice and build**
-- Records the narration through the ElevenLabs API with your key and checks every clip with Whisper, or uses clips you recorded yourself.
+- Voices the narration your way: through the ElevenLabs API with your key (it shows you how to add the key), from clips you record in ElevenLabs yourself (with step-by-step instructions), or free on your own computer with Kokoro, an open-source voice (setup for Mac with Apple Silicon or Intel, Windows and Linux; on Android it explains the options). Every clip is checked with Whisper, and the finished video is checked for voice-to-picture sync.
 - **"Cinematic Desk" look:** each story is a printed news brief lying on a dark desk, under a warm window light whose blind shadows drift slowly across the scene.
 - **Type and motion:** kinetic serif headlines with motion trails, keyword checklists that tick on the beat, a slow camera dolly and paper-plane transitions between stories.
 - **Category colours:** World, Tech, Business, Sports and Breaking, with a consistent brand (intro sting, outro, sign-on and sign-off lines).
@@ -59,7 +59,7 @@ cp -R skills/youtube-news-video ~/.claude/skills/
 ## Requirements
 
 - Node.js 18+, Remotion and Three.js (the project is created by the skill; see `references/engine.md`), FFmpeg, and Python 3 with `faster-whisper`, `librosa` and `soundfile`.
-- An ElevenLabs account: the skill can record the narration for you with your API key (in the project's `keys.env`), or you record the clips yourself.
+- For the voice, one of: an ElevenLabs API key in the project's `keys.env`, your own ElevenLabs recordings, or the free Kokoro voice (`pip install kokoro soundfile` and `brew install espeak-ng`; the skill asks before installing).
 - Web search, for the research phase.
 
 ## How to use it
@@ -68,7 +68,7 @@ cp -R skills/youtube-news-video ~/.claude/skills/
 Make today's news episode: 4 world and tech stories, about 3 minutes.
 ```
 
-Phase 1 ends with the scripts and metadata, and asks whether it should record the voice with your ElevenLabs key. If you'd rather record the clips yourself, generate them in ElevenLabs with the given names, then:
+Phase 1 ends with the scripts and metadata, and asks how to voice them: ElevenLabs with your key, your own ElevenLabs recordings, or the free Kokoro voice. If you record the clips yourself, it gives you the steps and file names, then:
 
 ```text
 Here are the audio clips for today's episode. Build the video and the 2 Shorts.
@@ -91,6 +91,6 @@ skills/youtube-news-video/
     reference_matching.md, subframe_accumulation.md
   scripts/
     render_scan.py, beat_sheet.py, check_shotlist.py, check_palette.py, check_frames.py,
-    cam_track.mjs, eleven_voice.py, eleven_sfx.py, ref_frames.py, track_motion.py, fit_easing.py,
+    cam_track.mjs, eleven_voice.py, sync_check.py, eleven_sfx.py, ref_frames.py, track_motion.py, fit_easing.py,
     motion_compare.py
 ```
